@@ -16,6 +16,7 @@
   const hintText = document.getElementById("hintText");
   const scoreboard = document.getElementById("scoreboard");
   const centerNotice = document.getElementById("centerNotice");
+  const hudToggleButton = document.getElementById("hudToggleButton");
   const copyInviteButton = document.getElementById("copyInviteButton");
   const mobileControls = document.getElementById("mobileControls");
   const moveStick = document.getElementById("moveStick");
@@ -101,6 +102,7 @@
     inviteBaseUrl: getBaseInviteUrl(),
     offlineReason: "",
     networkState: ONLINE_READY ? "connecting" : "offline",
+    hudExpanded: false,
     isTouchDevice: detectTouchDevice(),
     touch: {
       moveId: null,
@@ -132,6 +134,8 @@
       mobileControls.setAttribute("aria-hidden", "false");
     }
   }
+
+  setHudExpanded(!game.isTouchDevice && window.innerWidth > 1180);
 
   setupScene();
   bindEvents();
@@ -398,6 +402,8 @@
     const ship = buildShip(colorHex);
     ship.visible = false;
     scene.add(ship);
+    const marker = buildShipMarker(colorHex, isLocal);
+    scene.add(marker);
 
     return {
       id,
@@ -406,6 +412,7 @@
       name: getProfileName(profile, isLocal ? "Piloto local" : "Piloto"),
       colorHex,
       mesh: ship,
+      marker,
       position: new THREE.Vector3(),
       targetPosition: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
@@ -565,6 +572,12 @@
       game.keys = Object.create(null);
       game.justPressed.clear();
     });
+
+    if (hudToggleButton) {
+      hudToggleButton.addEventListener("click", () => {
+        setHudExpanded(!game.hudExpanded);
+      });
+    }
 
     copyInviteButton.addEventListener("click", async () => {
       const link = getInviteLink();
@@ -1387,8 +1400,6 @@
     } else if (local && !local.alive) {
       const seconds = Math.max(0, Math.ceil((local.respawnAt - performance.now()) / 1000));
       updateCenterNotice(`Nave destruida. Respawn em ${seconds}s.`);
-    } else if (game.isTouchDevice) {
-      updateCenterNotice("Controles mobile ativos: mova no joystick, mire na area direita e use os botoes para boost/disparo.");
     } else {
       centerNotice.style.opacity = "0";
     }
@@ -1480,6 +1491,10 @@
 
     scene.remove(entity.mesh);
     disposeShip(entity.mesh);
+    if (entity.marker) {
+      scene.remove(entity.marker);
+      entity.marker.material.dispose();
+    }
     game.players.delete(id);
     game.playerOrder = game.playerOrder.filter((entry) => entry !== id);
   }
@@ -1502,6 +1517,9 @@
 
   function applyShipVisual(entity, position, yaw, pitch, roll, delta) {
     entity.mesh.visible = entity.alive;
+    if (entity.marker) {
+      entity.marker.visible = entity.alive && !entity.isLocal;
+    }
     if (!entity.alive) {
       return;
     }
@@ -1514,6 +1532,14 @@
     const thrusters = entity.mesh.userData.thrusters || [];
     for (let i = 0; i < thrusters.length; i += 1) {
       thrusters[i].scale.setScalar(enginePulse);
+    }
+
+    if (entity.marker && entity.marker.visible) {
+      entity.marker.position.copy(position);
+      entity.marker.position.y += 12;
+      const distance = camera.position.distanceTo(entity.marker.position);
+      const scale = THREE.MathUtils.clamp(distance * 0.026, 14, 52);
+      entity.marker.scale.set(scale, scale, 1);
     }
 
     const glowMat = entity.mesh.userData.glowMat;
@@ -1757,6 +1783,10 @@
   }
 
   function onResize() {
+    if (!game.isTouchDevice && window.innerWidth < 1080 && game.hudExpanded) {
+      setHudExpanded(false);
+    }
+
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -1833,6 +1863,51 @@
     hullMat.color.copy(hullColor);
     glowMat.color.copy(glowColor);
     glowMat.emissive.copy(glowColor.clone().multiplyScalar(0.55));
+  }
+
+  function buildShipMarker(colorValue, isLocal) {
+    const canvasMarker = document.createElement("canvas");
+    canvasMarker.width = 64;
+    canvasMarker.height = 64;
+    const ctx = canvasMarker.getContext("2d");
+
+    if (ctx) {
+      ctx.clearRect(0, 0, 64, 64);
+      ctx.translate(32, 32);
+      ctx.beginPath();
+      ctx.moveTo(0, -24);
+      ctx.lineTo(18, 10);
+      ctx.lineTo(-18, 10);
+      ctx.closePath();
+      ctx.fillStyle = isLocal ? "#ffd88a" : String(colorValue || "#8fd0ff");
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(4, 8, 16, 0.85)";
+      ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvasMarker);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false
+    }));
+    marker.visible = !isLocal;
+    marker.renderOrder = 1000;
+    return marker;
+  }
+
+  function setHudExpanded(expanded) {
+    game.hudExpanded = expanded;
+    document.body.classList.toggle("hud-expanded", expanded);
+    document.body.classList.toggle("hud-collapsed", !expanded);
+    if (hudToggleButton) {
+      hudToggleButton.textContent = expanded ? "HUD ON" : "HUD";
+      hudToggleButton.setAttribute("aria-expanded", expanded ? "true" : "false");
+    }
   }
 
 })();
