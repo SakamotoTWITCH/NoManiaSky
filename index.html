@@ -66,6 +66,21 @@
   <div class="reticle" aria-hidden="true"></div>
   <div class="center-notice" id="centerNotice">Clique no cenario para capturar o mouse.</div>
 
+  <div id="mobileControls" class="mobile-controls" aria-hidden="true">
+    <div class="mobile-stick-wrap">
+      <div id="moveStick" class="mobile-stick">
+        <span id="moveKnob" class="mobile-stick__knob"></span>
+      </div>
+    </div>
+    <div id="lookPad" class="mobile-lookpad" aria-label="Area de mira por toque"></div>
+    <div class="mobile-buttons">
+      <button id="mobileBoost" type="button" class="mobile-btn">Boost</button>
+      <button id="mobileUp" type="button" class="mobile-btn">Subir</button>
+      <button id="mobileDown" type="button" class="mobile-btn">Descer</button>
+      <button id="mobileFire" type="button" class="mobile-btn mobile-btn--fire">Disparar</button>
+    </div>
+  </div>
+
   <script src="three.min.js"></script>
   <script src="playroom.config.js"></script>
   <script src="https://unpkg.com/playroomkit/multiplayer.full.umd.js" crossorigin="anonymous"></script>

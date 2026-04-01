@@ -17,6 +17,14 @@
   const scoreboard = document.getElementById("scoreboard");
   const centerNotice = document.getElementById("centerNotice");
   const copyInviteButton = document.getElementById("copyInviteButton");
+  const mobileControls = document.getElementById("mobileControls");
+  const moveStick = document.getElementById("moveStick");
+  const moveKnob = document.getElementById("moveKnob");
+  const lookPad = document.getElementById("lookPad");
+  const mobileBoost = document.getElementById("mobileBoost");
+  const mobileUp = document.getElementById("mobileUp");
+  const mobileDown = document.getElementById("mobileDown");
+  const mobileFire = document.getElementById("mobileFire");
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -65,6 +73,7 @@
   const MATCH_SEND_INTERVAL = 0.05;
   const RESPAWN_DELAY = 5;
   const BATTLEFIELD_RADIUS = 2600;
+  const TOUCH_LOOK_SENSITIVITY = 0.0034;
   const MAX_PLAYERS = Math.max(2, CONFIG.maxPlayersPerRoom || 4);
   const RECONNECT_GRACE_PERIOD = CONFIG.reconnectGracePeriodMs || 15000;
   const PLAYROOM_GAME_ID = typeof CONFIG.playroomGameId === "string" ? CONFIG.playroomGameId.trim() : "";
@@ -92,6 +101,19 @@
     inviteBaseUrl: getBaseInviteUrl(),
     offlineReason: "",
     networkState: ONLINE_READY ? "connecting" : "offline",
+    isTouchDevice: detectTouchDevice(),
+    touch: {
+      moveId: null,
+      lookId: null,
+      moveX: 0,
+      moveY: 0,
+      lookX: 0,
+      lookY: 0,
+      firing: false,
+      boost: false,
+      ascend: false,
+      descend: false
+    },
     hostRuntime: {
       initialized: false,
       activeHostId: "",
@@ -103,6 +125,13 @@
       matchTimer: 0
     }
   };
+
+  if (game.isTouchDevice) {
+    document.body.classList.add("is-touch-device");
+    if (mobileControls) {
+      mobileControls.setAttribute("aria-hidden", "false");
+    }
+  }
 
   setupScene();
   bindEvents();
@@ -460,9 +489,15 @@
   }
 
   function bindEvents() {
+    bindMobileEvents();
+
     window.addEventListener("resize", onResize);
 
     canvas.addEventListener("click", () => {
+      if (game.isTouchDevice) {
+        return;
+      }
+
       if (!game.pointerLocked) {
         canvas.requestPointerLock();
       }
@@ -471,7 +506,7 @@
     canvas.addEventListener("mousedown", (event) => {
       if (event.button === 0) {
         game.mouseDown = true;
-        if (!game.pointerLocked) {
+        if (!game.pointerLocked && !game.isTouchDevice) {
           canvas.requestPointerLock();
         }
       }
@@ -546,6 +581,174 @@
     });
   }
 
+
+  function bindMobileEvents() {
+    if (!game.isTouchDevice || !moveStick || !moveKnob || !lookPad) {
+      return;
+    }
+
+    const updateButtonState = (button, active) => {
+      if (!button) {
+        return;
+      }
+      button.classList.toggle("is-active", active);
+    };
+
+    const bindHoldButton = (button, onStart, onEnd) => {
+      if (!button) {
+        return;
+      }
+
+      const start = (event) => {
+        event.preventDefault();
+        onStart();
+      };
+
+      const end = (event) => {
+        event.preventDefault();
+        onEnd();
+      };
+
+      button.addEventListener("touchstart", start, { passive: false });
+      button.addEventListener("touchend", end, { passive: false });
+      button.addEventListener("touchcancel", end, { passive: false });
+      button.addEventListener("pointerdown", start);
+      button.addEventListener("pointerup", end);
+      button.addEventListener("pointercancel", end);
+      button.addEventListener("pointerleave", end);
+    };
+
+    const updateMoveKnob = () => {
+      const radius = moveStick.clientWidth * 0.5;
+      const knobRadius = moveKnob.clientWidth * 0.5;
+      const range = Math.max(1, radius - knobRadius - 6);
+      moveKnob.style.transform = `translate(${game.touch.moveX * range}px, ${game.touch.moveY * range}px)`;
+    };
+
+    const setMoveVectorFromPoint = (clientX, clientY) => {
+      const rect = moveStick.getBoundingClientRect();
+      const cx = rect.left + (rect.width * 0.5);
+      const cy = rect.top + (rect.height * 0.5);
+      let dx = (clientX - cx) / (rect.width * 0.5);
+      let dy = (clientY - cy) / (rect.height * 0.5);
+      const len = Math.hypot(dx, dy);
+      if (len > 1) {
+        dx /= len;
+        dy /= len;
+      }
+      game.touch.moveX = dx;
+      game.touch.moveY = dy;
+      updateMoveKnob();
+    };
+
+    moveStick.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      const touch = event.changedTouches[0];
+      game.touch.moveId = touch.identifier;
+      setMoveVectorFromPoint(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    moveStick.addEventListener("touchmove", (event) => {
+      event.preventDefault();
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.moveId) {
+          setMoveVectorFromPoint(touch.clientX, touch.clientY);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    const clearMove = () => {
+      game.touch.moveId = null;
+      game.touch.moveX = 0;
+      game.touch.moveY = 0;
+      updateMoveKnob();
+    };
+
+    moveStick.addEventListener("touchend", (event) => {
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.moveId) {
+          clearMove();
+          break;
+        }
+      }
+    });
+
+    moveStick.addEventListener("touchcancel", clearMove);
+
+    let lastLookX = 0;
+    let lastLookY = 0;
+
+    lookPad.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      const touch = event.changedTouches[0];
+      game.touch.lookId = touch.identifier;
+      lastLookX = touch.clientX;
+      lastLookY = touch.clientY;
+    }, { passive: false });
+
+    lookPad.addEventListener("touchmove", (event) => {
+      event.preventDefault();
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.lookId) {
+          game.touch.lookX += touch.clientX - lastLookX;
+          game.touch.lookY += touch.clientY - lastLookY;
+          lastLookX = touch.clientX;
+          lastLookY = touch.clientY;
+          break;
+        }
+      }
+    }, { passive: false });
+
+    const clearLook = () => {
+      game.touch.lookId = null;
+    };
+
+    lookPad.addEventListener("touchend", (event) => {
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.lookId) {
+          clearLook();
+          break;
+        }
+      }
+    });
+    lookPad.addEventListener("touchcancel", clearLook);
+
+    bindHoldButton(mobileFire, () => {
+      game.touch.firing = true;
+      updateButtonState(mobileFire, true);
+    }, () => {
+      game.touch.firing = false;
+      updateButtonState(mobileFire, false);
+    });
+
+    bindHoldButton(mobileBoost, () => {
+      game.touch.boost = true;
+      updateButtonState(mobileBoost, true);
+    }, () => {
+      game.touch.boost = false;
+      updateButtonState(mobileBoost, false);
+    });
+
+    bindHoldButton(mobileUp, () => {
+      game.touch.ascend = true;
+      updateButtonState(mobileUp, true);
+    }, () => {
+      game.touch.ascend = false;
+      updateButtonState(mobileUp, false);
+    });
+
+    bindHoldButton(mobileDown, () => {
+      game.touch.descend = true;
+      updateButtonState(mobileDown, true);
+    }, () => {
+      game.touch.descend = false;
+      updateButtonState(mobileDown, false);
+    });
+
+    updateMoveKnob();
+  }
+
   function animate() {
     requestAnimationFrame(animate);
 
@@ -596,16 +799,23 @@
   }
 
   function simulateLocalShip(entity, delta) {
-    if (!game.pointerLocked) {
+    if (game.isTouchDevice) {
+      entity.yaw -= game.touch.lookX * TOUCH_LOOK_SENSITIVITY;
+      entity.pitch = THREE.MathUtils.clamp(entity.pitch - (game.touch.lookY * TOUCH_LOOK_SENSITIVITY), -1.2, 1.2);
+      game.touch.lookX = 0;
+      game.touch.lookY = 0;
+    }
+
+    if (!game.pointerLocked && !game.isTouchDevice) {
       entity.velocity.multiplyScalar(Math.exp(-SHIP_DRAG * delta));
       entity.position.addScaledVector(entity.velocity, delta);
       constrainPosition(entity.position, entity.velocity);
       return;
     }
 
-    const moveForward = (game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0);
-    const moveRight = (game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0);
-    const moveUp = (game.keys.Space ? 1 : 0) - ((game.keys.ControlLeft || game.keys.ControlRight) ? 1 : 0);
+    const moveForward = ((game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0)) + (-game.touch.moveY);
+    const moveRight = ((game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0)) + game.touch.moveX;
+    const moveUp = ((game.keys.Space ? 1 : 0) - ((game.keys.ControlLeft || game.keys.ControlRight) ? 1 : 0)) + (game.touch.ascend ? 1 : 0) - (game.touch.descend ? 1 : 0);
 
     tempEuler.set(entity.pitch, entity.yaw, 0, "YXZ");
     tempQuat.setFromEuler(tempEuler);
@@ -623,7 +833,7 @@
       desiredDirection.normalize();
     }
 
-    const maxSpeed = (game.keys.ShiftLeft || game.keys.ShiftRight) ? SHIP_BOOST_SPEED : SHIP_BASE_SPEED;
+    const maxSpeed = (game.keys.ShiftLeft || game.keys.ShiftRight || game.touch.boost) ? SHIP_BOOST_SPEED : SHIP_BASE_SPEED;
     const desiredVelocity = desiredDirection.multiplyScalar(maxSpeed);
     entity.velocity.lerp(desiredVelocity, 1 - Math.exp(-SHIP_RESPONSE * delta));
 
@@ -638,7 +848,7 @@
   }
 
   function maybeFire(entity) {
-    const wantsFire = game.mouseDown || game.keys.KeyJ;
+    const wantsFire = game.mouseDown || game.keys.KeyJ || game.touch.firing;
     if (!wantsFire) {
       return;
     }
@@ -1158,21 +1368,27 @@
 
     if (game.networkState === "offline") {
       hintText.textContent = game.offlineReason;
-      controlsText.textContent = "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara. Preencha o gameId para ligar o multiplayer.";
+      controlsText.textContent = game.isTouchDevice
+        ? "Mobile: joystick esquerdo move, area direita mira, Boost acelera, Subir/Descer controlam altura e Disparar atira. Preencha o gameId para ligar o multiplayer."
+        : "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara. Preencha o gameId para ligar o multiplayer.";
     } else if (local && !local.alive) {
       const seconds = Math.max(0, Math.ceil((local.respawnAt - performance.now()) / 1000));
       hintText.textContent = `Nave destruida. Respawn em ${seconds}s.`;
       controlsText.textContent = "Aguarde o respawn enquanto os outros pilotos continuam a batalha.";
     } else {
       hintText.textContent = "Convide outros pilotos pelo link da sala e destrua as naves inimigas antes de ser abatido.";
-      controlsText.textContent = "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara.";
+      controlsText.textContent = game.isTouchDevice
+        ? "Mobile: joystick esquerdo move, area direita mira, Boost acelera, Subir/Descer controlam altura e Disparar atira."
+        : "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara.";
     }
 
-    if (!game.pointerLocked) {
+    if (!game.pointerLocked && !game.isTouchDevice) {
       updateCenterNotice(game.networkState === "online" ? "Clique no cenario para capturar o mouse e entrar no combate." : `${game.offlineReason} Clique no cenario para pilotar.`, true);
     } else if (local && !local.alive) {
       const seconds = Math.max(0, Math.ceil((local.respawnAt - performance.now()) / 1000));
       updateCenterNotice(`Nave destruida. Respawn em ${seconds}s.`);
+    } else if (game.isTouchDevice) {
+      updateCenterNotice("Controles mobile ativos: mova no joystick, mire na area direita e use os botoes para boost/disparo.");
     } else {
       centerNotice.style.opacity = "0";
     }
@@ -1534,6 +1750,10 @@
       return CONFIG.roomBaseUrl;
     }
     return window.location.href.split("#")[0];
+  }
+
+  function detectTouchDevice() {
+    return window.matchMedia("(pointer: coarse)").matches || ("ontouchstart" in window);
   }
 
   function onResize() {

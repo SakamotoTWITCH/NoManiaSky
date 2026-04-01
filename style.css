@@ -277,6 +277,111 @@ body.is-locked .center-notice.is-lock-hint {
   opacity: 0;
 }
 
+
+
+.mobile-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+}
+
+.mobile-stick-wrap,
+.mobile-lookpad,
+.mobile-buttons {
+  pointer-events: auto;
+}
+
+.mobile-stick-wrap {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.mobile-stick {
+  width: clamp(112px, 22vw, 148px);
+  height: clamp(112px, 22vw, 148px);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(5, 10, 24, 0.52);
+  position: relative;
+  touch-action: none;
+}
+
+.mobile-stick__knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(42px, 9vw, 56px);
+  height: clamp(42px, 9vw, 56px);
+  margin-left: calc(clamp(42px, 9vw, 56px) / -2);
+  margin-top: calc(clamp(42px, 9vw, 56px) / -2);
+  border-radius: 50%;
+  background: rgba(255, 193, 120, 0.85);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+.mobile-lookpad {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  width: clamp(140px, 30vw, 260px);
+  height: clamp(140px, 30vw, 260px);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(5, 10, 24, 0.28);
+  touch-action: none;
+}
+
+.mobile-buttons {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  top: max(12px, env(safe-area-inset-top));
+  display: grid;
+  gap: 8px;
+  width: clamp(110px, 24vw, 150px);
+}
+
+.mobile-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(7, 15, 28, 0.82);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 10px 8px;
+  touch-action: manipulation;
+}
+
+.mobile-btn.is-active {
+  transform: scale(0.97);
+  filter: brightness(1.12);
+  border-color: rgba(255, 198, 117, 0.82);
+}
+
+.mobile-btn--fire {
+  background: linear-gradient(135deg, rgba(255, 121, 121, 0.9), rgba(255, 174, 116, 0.9));
+  color: #240b00;
+}
+
+body.is-touch-device .mobile-controls {
+  display: block;
+}
+
+body.is-touch-device .panel {
+  backdrop-filter: blur(8px);
+}
+
+body.is-touch-device #game {
+  cursor: default;
+  touch-action: none;
+}
+
+body.is-touch-device .reticle {
+  opacity: 0.22;
+}
+
 @media (max-width: 980px) {
   .panel--top,
   .panel--right,
@@ -310,5 +415,19 @@ body.is-locked .center-notice.is-lock-hint {
 
   .panel--bottom {
     display: none;
+  }
+
+  body.is-touch-device .panel--right {
+    bottom: 198px;
+  }
+
+  body.is-touch-device .panel--score {
+    bottom: 84px;
+    max-height: 168px;
+  }
+
+  body.is-touch-device .panel--left {
+    width: min(220px, calc(100vw - 24px));
+    bottom: 160px;
   }
 }
