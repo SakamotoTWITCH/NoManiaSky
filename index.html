@@ -3,45 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>No Mania Sky Dogfight</title>
+  <title>No Mania Sky</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <canvas id="game" aria-label="Arena 3D espacial multiplayer"></canvas>
 
   <div class="hud">
-    <section class="panel panel--top">
-      <p class="eyebrow">Three.js + Playroom Kit</p>
-      <h1>No Mania Sky Dogfight</h1>
-      <p id="statusLine">Preparando arena espacial...</p>
-    </section>
-
     <section class="panel panel--left">
-      <div class="stat">
-        <span>Piloto</span>
-        <strong id="pilotValue">-</strong>
-      </div>
-      <div class="stat">
-        <span>Conexao</span>
-        <strong id="networkValue">Inicializando</strong>
-      </div>
-      <div class="stat">
-        <span>Sala</span>
-        <strong id="roomValue">-</strong>
-      </div>
-      <div class="stat">
-        <span>Jogadores</span>
-        <strong id="playersValue">0</strong>
-      </div>
-      <div class="stat">
-        <span>Vida</span>
-        <strong id="healthValue">100</strong>
-        <div class="healthbar"><span id="healthBarFill"></span></div>
-      </div>
-      <div class="stat">
-        <span>Abates / Quedas</span>
-        <strong id="scoreValue">0 / 0</strong>
-      </div>
+      <canvas id="miniMap" class="mini-map" width="180" height="180" aria-label="Minimapa da arena"></canvas>
     </section>
 
     <section class="panel panel--right panel--interactive">
@@ -59,7 +29,17 @@
     </section>
 
     <section class="panel panel--bottom">
-      <p id="hintText">Os planetas viraram o pano de fundo da arena. Monte a sala, convide outros pilotos e destrua as outras naves.</p>
+      <p id="statusLine">Preparando arena espacial...</p>
+      <div class="bottom-stats">
+        <span id="pilotValue">-</span>
+        <span id="networkValue">Inicializando</span>
+        <span>Sala <strong id="roomValue">-</strong></span>
+        <span>Jogadores <strong id="playersValue">0</strong></span>
+        <span>Vida <strong id="healthValue">100</strong></span>
+        <span>K/D <strong id="scoreValue">0 / 0</strong></span>
+      </div>
+      <div class="healthbar"><span id="healthBarFill"></span></div>
+      <p id="hintText">Convide outros pilotos e destrua as naves inimigas.</p>
     </section>
   </div>
 

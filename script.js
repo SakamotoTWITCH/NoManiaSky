@@ -26,6 +26,7 @@
   const mobileUp = document.getElementById("mobileUp");
   const mobileDown = document.getElementById("mobileDown");
   const mobileFire = document.getElementById("mobileFire");
+  const miniMap = document.getElementById("miniMap");
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -74,7 +75,9 @@
   const MATCH_SEND_INTERVAL = 0.05;
   const RESPAWN_DELAY = 5;
   const BATTLEFIELD_RADIUS = 2600;
-  const TOUCH_LOOK_SENSITIVITY = 0.0034;
+  const TOUCH_LOOK_SENSITIVITY = 0.0056;
+  const TOUCH_THRUST_BOOST = 1.28;
+  const MINIMAP_RANGE = 950;
   const MAX_PLAYERS = Math.max(2, CONFIG.maxPlayersPerRoom || 4);
   const RECONNECT_GRACE_PERIOD = CONFIG.reconnectGracePeriodMs || 15000;
   const PLAYROOM_GAME_ID = typeof CONFIG.playroomGameId === "string" ? CONFIG.playroomGameId.trim() : "";
@@ -404,6 +407,8 @@
     scene.add(ship);
     const marker = buildShipMarker(colorHex, isLocal);
     scene.add(marker);
+    const hpBillboard = buildHealthBillboard();
+    scene.add(hpBillboard.sprite);
 
     return {
       id,
@@ -413,6 +418,7 @@
       colorHex,
       mesh: ship,
       marker,
+      hpBillboard,
       position: new THREE.Vector3(),
       targetPosition: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
@@ -826,8 +832,10 @@
       return;
     }
 
-    const moveForward = ((game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0)) + (-game.touch.moveY);
-    const moveRight = ((game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0)) + game.touch.moveX;
+    const touchForward = -game.touch.moveY * TOUCH_THRUST_BOOST;
+    const touchRight = game.touch.moveX * TOUCH_THRUST_BOOST;
+    const moveForward = ((game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0)) + touchForward;
+    const moveRight = ((game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0)) + touchRight;
     const moveUp = ((game.keys.Space ? 1 : 0) - ((game.keys.ControlLeft || game.keys.ControlRight) ? 1 : 0)) + (game.touch.ascend ? 1 : 0) - (game.touch.descend ? 1 : 0);
 
     tempEuler.set(entity.pitch, entity.yaw, 0, "YXZ");
@@ -1405,6 +1413,7 @@
     }
 
     renderScoreboard();
+    renderMiniMap(local);
   }
 
   function renderScoreboard() {
@@ -1493,7 +1502,13 @@
     disposeShip(entity.mesh);
     if (entity.marker) {
       scene.remove(entity.marker);
+      entity.marker.material.map.dispose();
       entity.marker.material.dispose();
+    }
+    if (entity.hpBillboard) {
+      scene.remove(entity.hpBillboard.sprite);
+      entity.hpBillboard.texture.dispose();
+      entity.hpBillboard.sprite.material.dispose();
     }
     game.players.delete(id);
     game.playerOrder = game.playerOrder.filter((entry) => entry !== id);
@@ -1540,6 +1555,16 @@
       const distance = camera.position.distanceTo(entity.marker.position);
       const scale = THREE.MathUtils.clamp(distance * 0.026, 14, 52);
       entity.marker.scale.set(scale, scale, 1);
+    }
+
+    if (entity.hpBillboard) {
+      entity.hpBillboard.sprite.visible = entity.alive;
+      entity.hpBillboard.sprite.position.copy(position);
+      entity.hpBillboard.sprite.position.y += 8.2;
+      updateHealthBillboard(entity.hpBillboard, THREE.MathUtils.clamp(entity.hp / MAX_HEALTH, 0, 1));
+      const hpDistance = camera.position.distanceTo(entity.hpBillboard.sprite.position);
+      const hpScale = THREE.MathUtils.clamp(hpDistance * 0.016, 9, 24);
+      entity.hpBillboard.sprite.scale.set(hpScale * 1.7, hpScale * 0.28, 1);
     }
 
     const glowMat = entity.mesh.userData.glowMat;
@@ -1776,6 +1801,89 @@
       return CONFIG.roomBaseUrl;
     }
     return window.location.href.split("#")[0];
+  }
+
+
+  function buildHealthBillboard() {
+    const canvasHp = document.createElement("canvas");
+    canvasHp.width = 128;
+    canvasHp.height = 24;
+    const texture = new THREE.CanvasTexture(canvasHp);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false
+    }));
+    sprite.renderOrder = 999;
+    return { sprite, texture, canvas: canvasHp, lastValue: -1 };
+  }
+
+  function updateHealthBillboard(billboard, value) {
+    if (!billboard || Math.abs(value - billboard.lastValue) < 0.01) {
+      return;
+    }
+    billboard.lastValue = value;
+    const ctx = billboard.canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, billboard.canvas.width, billboard.canvas.height);
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, 128, 24);
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(4, 4, 120, 16);
+    const color = value > 0.6 ? "#6ff3a4" : (value > 0.3 ? "#ffd66b" : "#ff7373");
+    ctx.fillStyle = color;
+    ctx.fillRect(4, 4, 120 * value, 16);
+    billboard.texture.needsUpdate = true;
+  }
+
+  function renderMiniMap(local) {
+    if (!miniMap || !local) {
+      return;
+    }
+
+    const ctx = miniMap.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    const size = miniMap.width;
+    const center = size * 0.5;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = "rgba(4, 12, 22, 0.82)";
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(center, center, center - 8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffd88a";
+    ctx.beginPath();
+    ctx.arc(center, center, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const [id, entity] of game.players.entries()) {
+      if (id === game.localPlayerId || !entity.alive) {
+        continue;
+      }
+      const dx = entity.position.x - local.position.x;
+      const dz = entity.position.z - local.position.z;
+      const yaw = -local.yaw;
+      const rx = (dx * Math.cos(yaw)) - (dz * Math.sin(yaw));
+      const rz = (dx * Math.sin(yaw)) + (dz * Math.cos(yaw));
+      const px = THREE.MathUtils.clamp(center + ((rx / MINIMAP_RANGE) * (center - 12)), 10, size - 10);
+      const py = THREE.MathUtils.clamp(center + ((rz / MINIMAP_RANGE) * (center - 12)), 10, size - 10);
+      ctx.fillStyle = "#ff7f7f";
+      ctx.beginPath();
+      ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   function detectTouchDevice() {
