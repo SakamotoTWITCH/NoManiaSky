@@ -16,7 +16,17 @@
   const hintText = document.getElementById("hintText");
   const scoreboard = document.getElementById("scoreboard");
   const centerNotice = document.getElementById("centerNotice");
+  const hudToggleButton = document.getElementById("hudToggleButton");
   const copyInviteButton = document.getElementById("copyInviteButton");
+  const mobileControls = document.getElementById("mobileControls");
+  const moveStick = document.getElementById("moveStick");
+  const moveKnob = document.getElementById("moveKnob");
+  const lookPad = document.getElementById("lookPad");
+  const mobileBoost = document.getElementById("mobileBoost");
+  const mobileUp = document.getElementById("mobileUp");
+  const mobileDown = document.getElementById("mobileDown");
+  const mobileFire = document.getElementById("mobileFire");
+  const miniMap = document.getElementById("miniMap");
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -65,6 +75,9 @@
   const MATCH_SEND_INTERVAL = 0.05;
   const RESPAWN_DELAY = 5;
   const BATTLEFIELD_RADIUS = 2600;
+  const TOUCH_LOOK_SENSITIVITY = 0.0056;
+  const TOUCH_THRUST_BOOST = 1.28;
+  const MINIMAP_RANGE = 950;
   const MAX_PLAYERS = Math.max(2, CONFIG.maxPlayersPerRoom || 4);
   const RECONNECT_GRACE_PERIOD = CONFIG.reconnectGracePeriodMs || 15000;
   const PLAYROOM_GAME_ID = typeof CONFIG.playroomGameId === "string" ? CONFIG.playroomGameId.trim() : "";
@@ -92,6 +105,20 @@
     inviteBaseUrl: getBaseInviteUrl(),
     offlineReason: "",
     networkState: ONLINE_READY ? "connecting" : "offline",
+    hudExpanded: false,
+    isTouchDevice: detectTouchDevice(),
+    touch: {
+      moveId: null,
+      lookId: null,
+      moveX: 0,
+      moveY: 0,
+      lookX: 0,
+      lookY: 0,
+      firing: false,
+      boost: false,
+      ascend: false,
+      descend: false
+    },
     hostRuntime: {
       initialized: false,
       activeHostId: "",
@@ -103,6 +130,15 @@
       matchTimer: 0
     }
   };
+
+  if (game.isTouchDevice) {
+    document.body.classList.add("is-touch-device");
+    if (mobileControls) {
+      mobileControls.setAttribute("aria-hidden", "false");
+    }
+  }
+
+  setHudExpanded(!game.isTouchDevice && window.innerWidth > 1180);
 
   setupScene();
   bindEvents();
@@ -369,6 +405,10 @@
     const ship = buildShip(colorHex);
     ship.visible = false;
     scene.add(ship);
+    const marker = buildShipMarker(colorHex, isLocal);
+    scene.add(marker);
+    const hpBillboard = buildHealthBillboard();
+    scene.add(hpBillboard.sprite);
 
     return {
       id,
@@ -377,6 +417,8 @@
       name: getProfileName(profile, isLocal ? "Piloto local" : "Piloto"),
       colorHex,
       mesh: ship,
+      marker,
+      hpBillboard,
       position: new THREE.Vector3(),
       targetPosition: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
@@ -460,9 +502,15 @@
   }
 
   function bindEvents() {
+    bindMobileEvents();
+
     window.addEventListener("resize", onResize);
 
     canvas.addEventListener("click", () => {
+      if (game.isTouchDevice) {
+        return;
+      }
+
       if (!game.pointerLocked) {
         canvas.requestPointerLock();
       }
@@ -471,7 +519,7 @@
     canvas.addEventListener("mousedown", (event) => {
       if (event.button === 0) {
         game.mouseDown = true;
-        if (!game.pointerLocked) {
+        if (!game.pointerLocked && !game.isTouchDevice) {
           canvas.requestPointerLock();
         }
       }
@@ -531,6 +579,12 @@
       game.justPressed.clear();
     });
 
+    if (hudToggleButton) {
+      hudToggleButton.addEventListener("click", () => {
+        setHudExpanded(!game.hudExpanded);
+      });
+    }
+
     copyInviteButton.addEventListener("click", async () => {
       const link = getInviteLink();
       if (!link) {
@@ -544,6 +598,174 @@
         inviteValue.textContent = link;
       }
     });
+  }
+
+
+  function bindMobileEvents() {
+    if (!game.isTouchDevice || !moveStick || !moveKnob || !lookPad) {
+      return;
+    }
+
+    const updateButtonState = (button, active) => {
+      if (!button) {
+        return;
+      }
+      button.classList.toggle("is-active", active);
+    };
+
+    const bindHoldButton = (button, onStart, onEnd) => {
+      if (!button) {
+        return;
+      }
+
+      const start = (event) => {
+        event.preventDefault();
+        onStart();
+      };
+
+      const end = (event) => {
+        event.preventDefault();
+        onEnd();
+      };
+
+      button.addEventListener("touchstart", start, { passive: false });
+      button.addEventListener("touchend", end, { passive: false });
+      button.addEventListener("touchcancel", end, { passive: false });
+      button.addEventListener("pointerdown", start);
+      button.addEventListener("pointerup", end);
+      button.addEventListener("pointercancel", end);
+      button.addEventListener("pointerleave", end);
+    };
+
+    const updateMoveKnob = () => {
+      const radius = moveStick.clientWidth * 0.5;
+      const knobRadius = moveKnob.clientWidth * 0.5;
+      const range = Math.max(1, radius - knobRadius - 6);
+      moveKnob.style.transform = `translate(${game.touch.moveX * range}px, ${game.touch.moveY * range}px)`;
+    };
+
+    const setMoveVectorFromPoint = (clientX, clientY) => {
+      const rect = moveStick.getBoundingClientRect();
+      const cx = rect.left + (rect.width * 0.5);
+      const cy = rect.top + (rect.height * 0.5);
+      let dx = (clientX - cx) / (rect.width * 0.5);
+      let dy = (clientY - cy) / (rect.height * 0.5);
+      const len = Math.hypot(dx, dy);
+      if (len > 1) {
+        dx /= len;
+        dy /= len;
+      }
+      game.touch.moveX = dx;
+      game.touch.moveY = dy;
+      updateMoveKnob();
+    };
+
+    moveStick.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      const touch = event.changedTouches[0];
+      game.touch.moveId = touch.identifier;
+      setMoveVectorFromPoint(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    moveStick.addEventListener("touchmove", (event) => {
+      event.preventDefault();
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.moveId) {
+          setMoveVectorFromPoint(touch.clientX, touch.clientY);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    const clearMove = () => {
+      game.touch.moveId = null;
+      game.touch.moveX = 0;
+      game.touch.moveY = 0;
+      updateMoveKnob();
+    };
+
+    moveStick.addEventListener("touchend", (event) => {
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.moveId) {
+          clearMove();
+          break;
+        }
+      }
+    });
+
+    moveStick.addEventListener("touchcancel", clearMove);
+
+    let lastLookX = 0;
+    let lastLookY = 0;
+
+    lookPad.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      const touch = event.changedTouches[0];
+      game.touch.lookId = touch.identifier;
+      lastLookX = touch.clientX;
+      lastLookY = touch.clientY;
+    }, { passive: false });
+
+    lookPad.addEventListener("touchmove", (event) => {
+      event.preventDefault();
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.lookId) {
+          game.touch.lookX += touch.clientX - lastLookX;
+          game.touch.lookY += touch.clientY - lastLookY;
+          lastLookX = touch.clientX;
+          lastLookY = touch.clientY;
+          break;
+        }
+      }
+    }, { passive: false });
+
+    const clearLook = () => {
+      game.touch.lookId = null;
+    };
+
+    lookPad.addEventListener("touchend", (event) => {
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === game.touch.lookId) {
+          clearLook();
+          break;
+        }
+      }
+    });
+    lookPad.addEventListener("touchcancel", clearLook);
+
+    bindHoldButton(mobileFire, () => {
+      game.touch.firing = true;
+      updateButtonState(mobileFire, true);
+    }, () => {
+      game.touch.firing = false;
+      updateButtonState(mobileFire, false);
+    });
+
+    bindHoldButton(mobileBoost, () => {
+      game.touch.boost = true;
+      updateButtonState(mobileBoost, true);
+    }, () => {
+      game.touch.boost = false;
+      updateButtonState(mobileBoost, false);
+    });
+
+    bindHoldButton(mobileUp, () => {
+      game.touch.ascend = true;
+      updateButtonState(mobileUp, true);
+    }, () => {
+      game.touch.ascend = false;
+      updateButtonState(mobileUp, false);
+    });
+
+    bindHoldButton(mobileDown, () => {
+      game.touch.descend = true;
+      updateButtonState(mobileDown, true);
+    }, () => {
+      game.touch.descend = false;
+      updateButtonState(mobileDown, false);
+    });
+
+    updateMoveKnob();
   }
 
   function animate() {
@@ -596,16 +818,25 @@
   }
 
   function simulateLocalShip(entity, delta) {
-    if (!game.pointerLocked) {
+    if (game.isTouchDevice) {
+      entity.yaw -= game.touch.lookX * TOUCH_LOOK_SENSITIVITY;
+      entity.pitch = THREE.MathUtils.clamp(entity.pitch - (game.touch.lookY * TOUCH_LOOK_SENSITIVITY), -1.2, 1.2);
+      game.touch.lookX = 0;
+      game.touch.lookY = 0;
+    }
+
+    if (!game.pointerLocked && !game.isTouchDevice) {
       entity.velocity.multiplyScalar(Math.exp(-SHIP_DRAG * delta));
       entity.position.addScaledVector(entity.velocity, delta);
       constrainPosition(entity.position, entity.velocity);
       return;
     }
 
-    const moveForward = (game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0);
-    const moveRight = (game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0);
-    const moveUp = (game.keys.Space ? 1 : 0) - ((game.keys.ControlLeft || game.keys.ControlRight) ? 1 : 0);
+    const touchForward = -game.touch.moveY * TOUCH_THRUST_BOOST;
+    const touchRight = game.touch.moveX * TOUCH_THRUST_BOOST;
+    const moveForward = ((game.keys.KeyW ? 1 : 0) - (game.keys.KeyS ? 1 : 0)) + touchForward;
+    const moveRight = ((game.keys.KeyD ? 1 : 0) - (game.keys.KeyA ? 1 : 0)) + touchRight;
+    const moveUp = ((game.keys.Space ? 1 : 0) - ((game.keys.ControlLeft || game.keys.ControlRight) ? 1 : 0)) + (game.touch.ascend ? 1 : 0) - (game.touch.descend ? 1 : 0);
 
     tempEuler.set(entity.pitch, entity.yaw, 0, "YXZ");
     tempQuat.setFromEuler(tempEuler);
@@ -623,7 +854,7 @@
       desiredDirection.normalize();
     }
 
-    const maxSpeed = (game.keys.ShiftLeft || game.keys.ShiftRight) ? SHIP_BOOST_SPEED : SHIP_BASE_SPEED;
+    const maxSpeed = (game.keys.ShiftLeft || game.keys.ShiftRight || game.touch.boost) ? SHIP_BOOST_SPEED : SHIP_BASE_SPEED;
     const desiredVelocity = desiredDirection.multiplyScalar(maxSpeed);
     entity.velocity.lerp(desiredVelocity, 1 - Math.exp(-SHIP_RESPONSE * delta));
 
@@ -638,7 +869,7 @@
   }
 
   function maybeFire(entity) {
-    const wantsFire = game.mouseDown || game.keys.KeyJ;
+    const wantsFire = game.mouseDown || game.keys.KeyJ || game.touch.firing;
     if (!wantsFire) {
       return;
     }
@@ -1158,17 +1389,21 @@
 
     if (game.networkState === "offline") {
       hintText.textContent = game.offlineReason;
-      controlsText.textContent = "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara. Preencha o gameId para ligar o multiplayer.";
+      controlsText.textContent = game.isTouchDevice
+        ? "Mobile: joystick esquerdo move, area direita mira, Boost acelera, Subir/Descer controlam altura e Disparar atira. Preencha o gameId para ligar o multiplayer."
+        : "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara. Preencha o gameId para ligar o multiplayer.";
     } else if (local && !local.alive) {
       const seconds = Math.max(0, Math.ceil((local.respawnAt - performance.now()) / 1000));
       hintText.textContent = `Nave destruida. Respawn em ${seconds}s.`;
       controlsText.textContent = "Aguarde o respawn enquanto os outros pilotos continuam a batalha.";
     } else {
       hintText.textContent = "Convide outros pilotos pelo link da sala e destrua as naves inimigas antes de ser abatido.";
-      controlsText.textContent = "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara.";
+      controlsText.textContent = game.isTouchDevice
+        ? "Mobile: joystick esquerdo move, area direita mira, Boost acelera, Subir/Descer controlam altura e Disparar atira."
+        : "Mouse mira, W A S D e Espaco/Ctrl movem, Shift acelera, clique esquerdo ou J dispara.";
     }
 
-    if (!game.pointerLocked) {
+    if (!game.pointerLocked && !game.isTouchDevice) {
       updateCenterNotice(game.networkState === "online" ? "Clique no cenario para capturar o mouse e entrar no combate." : `${game.offlineReason} Clique no cenario para pilotar.`, true);
     } else if (local && !local.alive) {
       const seconds = Math.max(0, Math.ceil((local.respawnAt - performance.now()) / 1000));
@@ -1178,6 +1413,7 @@
     }
 
     renderScoreboard();
+    renderMiniMap(local);
   }
 
   function renderScoreboard() {
@@ -1264,6 +1500,16 @@
 
     scene.remove(entity.mesh);
     disposeShip(entity.mesh);
+    if (entity.marker) {
+      scene.remove(entity.marker);
+      entity.marker.material.map.dispose();
+      entity.marker.material.dispose();
+    }
+    if (entity.hpBillboard) {
+      scene.remove(entity.hpBillboard.sprite);
+      entity.hpBillboard.texture.dispose();
+      entity.hpBillboard.sprite.material.dispose();
+    }
     game.players.delete(id);
     game.playerOrder = game.playerOrder.filter((entry) => entry !== id);
   }
@@ -1286,6 +1532,9 @@
 
   function applyShipVisual(entity, position, yaw, pitch, roll, delta) {
     entity.mesh.visible = entity.alive;
+    if (entity.marker) {
+      entity.marker.visible = entity.alive && !entity.isLocal;
+    }
     if (!entity.alive) {
       return;
     }
@@ -1298,6 +1547,24 @@
     const thrusters = entity.mesh.userData.thrusters || [];
     for (let i = 0; i < thrusters.length; i += 1) {
       thrusters[i].scale.setScalar(enginePulse);
+    }
+
+    if (entity.marker && entity.marker.visible) {
+      entity.marker.position.copy(position);
+      entity.marker.position.y += 12;
+      const distance = camera.position.distanceTo(entity.marker.position);
+      const scale = THREE.MathUtils.clamp(distance * 0.026, 14, 52);
+      entity.marker.scale.set(scale, scale, 1);
+    }
+
+    if (entity.hpBillboard) {
+      entity.hpBillboard.sprite.visible = entity.alive;
+      entity.hpBillboard.sprite.position.copy(position);
+      entity.hpBillboard.sprite.position.y += 8.2;
+      updateHealthBillboard(entity.hpBillboard, THREE.MathUtils.clamp(entity.hp / MAX_HEALTH, 0, 1));
+      const hpDistance = camera.position.distanceTo(entity.hpBillboard.sprite.position);
+      const hpScale = THREE.MathUtils.clamp(hpDistance * 0.016, 9, 24);
+      entity.hpBillboard.sprite.scale.set(hpScale * 1.7, hpScale * 0.28, 1);
     }
 
     const glowMat = entity.mesh.userData.glowMat;
@@ -1536,7 +1803,98 @@
     return window.location.href.split("#")[0];
   }
 
+
+  function buildHealthBillboard() {
+    const canvasHp = document.createElement("canvas");
+    canvasHp.width = 128;
+    canvasHp.height = 24;
+    const texture = new THREE.CanvasTexture(canvasHp);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false
+    }));
+    sprite.renderOrder = 999;
+    return { sprite, texture, canvas: canvasHp, lastValue: -1 };
+  }
+
+  function updateHealthBillboard(billboard, value) {
+    if (!billboard || Math.abs(value - billboard.lastValue) < 0.01) {
+      return;
+    }
+    billboard.lastValue = value;
+    const ctx = billboard.canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, billboard.canvas.width, billboard.canvas.height);
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, 128, 24);
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillRect(4, 4, 120, 16);
+    const color = value > 0.6 ? "#6ff3a4" : (value > 0.3 ? "#ffd66b" : "#ff7373");
+    ctx.fillStyle = color;
+    ctx.fillRect(4, 4, 120 * value, 16);
+    billboard.texture.needsUpdate = true;
+  }
+
+  function renderMiniMap(local) {
+    if (!miniMap || !local) {
+      return;
+    }
+
+    const ctx = miniMap.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    const size = miniMap.width;
+    const center = size * 0.5;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = "rgba(4, 12, 22, 0.82)";
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(center, center, center - 8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffd88a";
+    ctx.beginPath();
+    ctx.arc(center, center, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const [id, entity] of game.players.entries()) {
+      if (id === game.localPlayerId || !entity.alive) {
+        continue;
+      }
+      const dx = entity.position.x - local.position.x;
+      const dz = entity.position.z - local.position.z;
+      const yaw = -local.yaw;
+      const rx = (dx * Math.cos(yaw)) - (dz * Math.sin(yaw));
+      const rz = (dx * Math.sin(yaw)) + (dz * Math.cos(yaw));
+      const px = THREE.MathUtils.clamp(center + ((rx / MINIMAP_RANGE) * (center - 12)), 10, size - 10);
+      const py = THREE.MathUtils.clamp(center + ((rz / MINIMAP_RANGE) * (center - 12)), 10, size - 10);
+      ctx.fillStyle = "#ff7f7f";
+      ctx.beginPath();
+      ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function detectTouchDevice() {
+    return window.matchMedia("(pointer: coarse)").matches || ("ontouchstart" in window);
+  }
+
   function onResize() {
+    if (!game.isTouchDevice && window.innerWidth < 1080 && game.hudExpanded) {
+      setHudExpanded(false);
+    }
+
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -1613,6 +1971,51 @@
     hullMat.color.copy(hullColor);
     glowMat.color.copy(glowColor);
     glowMat.emissive.copy(glowColor.clone().multiplyScalar(0.55));
+  }
+
+  function buildShipMarker(colorValue, isLocal) {
+    const canvasMarker = document.createElement("canvas");
+    canvasMarker.width = 64;
+    canvasMarker.height = 64;
+    const ctx = canvasMarker.getContext("2d");
+
+    if (ctx) {
+      ctx.clearRect(0, 0, 64, 64);
+      ctx.translate(32, 32);
+      ctx.beginPath();
+      ctx.moveTo(0, -24);
+      ctx.lineTo(18, 10);
+      ctx.lineTo(-18, 10);
+      ctx.closePath();
+      ctx.fillStyle = isLocal ? "#ffd88a" : String(colorValue || "#8fd0ff");
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(4, 8, 16, 0.85)";
+      ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvasMarker);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false
+    }));
+    marker.visible = !isLocal;
+    marker.renderOrder = 1000;
+    return marker;
+  }
+
+  function setHudExpanded(expanded) {
+    game.hudExpanded = expanded;
+    document.body.classList.toggle("hud-expanded", expanded);
+    document.body.classList.toggle("hud-collapsed", !expanded);
+    if (hudToggleButton) {
+      hudToggleButton.textContent = expanded ? "HUD ON" : "HUD";
+      hudToggleButton.setAttribute("aria-expanded", expanded ? "true" : "false");
+    }
   }
 
 })();

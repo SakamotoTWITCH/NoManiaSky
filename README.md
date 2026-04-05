@@ -22,6 +22,25 @@ window.NO_MANIA_SKY_CONFIG = {
 
 `roomBaseUrl` pode ficar vazio. Quando vazio, o proprio endereco atual da pagina e usado para gerar o link da sala.
 
+
+## Controles
+
+### Computador
+- Mouse: mira
+- `W A S D`: movimento
+- `Espaco` / `Ctrl`: subir e descer
+- `Shift`: boost
+- Clique esquerdo ou `J`: disparo
+
+### Celular / tablet
+- Joystick esquerdo: movimento completo (frente/tras e lateral)
+- Area de toque direita: mira da nave
+- Botao `Boost`: acelera
+- Botoes `Subir` / `Descer`: controle vertical
+- Botao `Disparar`: tiro continuo enquanto pressionado
+
+Os controles mobile adaptam automaticamente para diferentes tamanhos de tela e usam `safe-area` para nao colidir com notch ou barras do sistema.
+
 ## Como publicar no GitHub Pages
 
 1. Envie estes arquivos para um repositorio no GitHub.
